@@ -114,26 +114,79 @@
 
 ## 6. Data Source Integration
 
-### 6.1 Primary Data Sources
+### 6.1 Primary Data Source: AKShare
 
-| Source | Type | Data Provided |
-|--------|------|---------------|
-| Wind | Commercial API | Bond data, quotes, curves |
-| CFETS | Official API | Interbank market data |
-| ChinaMoneyNet | Web Scraping/API | Public market data |
+AKShare (https://github.com/akfamily/akshare) is an open-source Python financial data library providing comprehensive China bond market data.
 
-### 6.2 Fallback Strategy
-- If primary sources unavailable, use cached data with timestamp warning
-- Implement retry mechanism with exponential backoff
+**Integration Architecture:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Wavelet Application (Java)                 │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐  │
+│  │ Data Service │───▶│ ProcessBridge │───▶│ Python AKShare   │  │
+│  │   (Java)     │    │ (ProcessExec)│    │   Scripts        │  │
+│  └──────────────┘    └──────────────┘    └──────────────────┘  │
+│         │                                       │               │
+│         ▼                                       ▼               │
+│  ┌──────────────┐                      ┌──────────────────┐      │
+│  │ PostgreSQL   │◀─────────────────────│ JSON Output     │      │
+│  │   Database   │                      │ (Stdout)         │      │
+│  └──────────────┘                      └──────────────────┘      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Available AKShare Bond APIs:**
+
+| Function | Description | Data |
+|----------|-------------|------|
+| `bond_spot_quote()` | Interbank market maker quotes | bid/ask price, yield |
+| `bond_spot_deal()` | Spot market trade data | price, yield, volume |
+| `bond_china_yield()` | ChinaBond yield curves | tenor vs yield |
+| `bond_info_cm()` | Bond master data | bond details from CFETS |
+| `bond_info_detail_cm()` | Bond detail info | full bond profile |
+| `bond_debt_nafmii()` | Interbank debt registration | registration data |
+
+**Python Data Fetcher Scripts:**
+
+| Script | Function |
+|--------|----------|
+| `fetch_quotes.py` | Fetch interbank bond quotes |
+| `fetch_trades.py` | Fetch spot market trades |
+| `fetch_yield_curve.py` | Fetch yield curve data |
+| `fetch_bond_info.py` | Fetch bond master data |
+
+**Installation:**
+```bash
+pip install akshare pandas
+```
+
+### 6.2 Data Entities Mapping
+
+| AKShare Data | Database Entity | Fields |
+|--------------|----------------|--------|
+| bond_spot_quote | Quote | bond_code, bid_price, ask_price, bid_yield, ask_yield, institution |
+| bond_spot_deal | Trade | bond_code, price, yield, change_bp, volume, weighted_yield |
+| bond_china_yield | CurvePoint | curve_name, date, tenor_3m, tenor_6m, tenor_1y, tenor_3y, tenor_5y, tenor_7y, tenor_10y, tenor_30y |
+| bond_info_cm | Bond | bond_code, bond_name, issuer, bond_type, issue_date, maturity_date, coupon_rate, rating |
+
+### 6.3 Fallback Strategy
+- If AKShare unavailable, use cached data with timestamp warning
+- Implement retry mechanism with exponential backoff (3 attempts, 2x delay)
 - Alert administrators on prolonged data unavailability
+
+### 6.4 Future Enhancement: Wind Integration
+Wind (paid) can replace AKShare for production use:
+- Wind Server API: https://www.wind.com.cn/mobile/WDS/sapi/en.html
+- Requires Wind Terminal license and Python integration
 
 ## 7. Acceptance Criteria
 
 ### AC-1: Data Ingestion
-- [ ] System connects to configured data sources successfully
+- [ ] System connects to AKShare Python scripts successfully
 - [ ] Data sync runs on schedule without manual intervention
 - [ ] Invalid data records are logged and skipped
 - [ ] Data freshness indicators show last update time
+- [ ] Python process errors are captured and logged in Java
 
 ### AC-2: Data Processing
 - [ ] Wavelet denoising reduces noise in price series
@@ -182,6 +235,12 @@ wavelet/
 │   │       └── static/
 │   └── test/
 │       └── java/com/mycompany/wavelet/
+├── scripts/
+│   ├── fetch_quotes.py
+│   ├── fetch_trades.py
+│   ├── fetch_yield_curve.py
+│   └── fetch_bond_info.py
+├── requirements.txt
 └── README.md
 ```
 
@@ -193,8 +252,11 @@ wavelet/
 - Basic CRUD operations
 - Configuration management
 
-### Phase 2: Data Integration
-- Data source connector implementations
+### Phase 2: AKShare Integration
+- Python environment setup
+- AKShare script development (fetch_quotes.py, fetch_trades.py, etc.)
+- Java ProcessBuilder integration
+- JSON parsing layer
 - Scheduled data sync jobs
 - Data validation layer
 
@@ -214,15 +276,58 @@ wavelet/
 ```yaml
 wavelet:
   datasource:
-    primary: wind
-    fallback: cfets
+    akshare:
+      enabled: true
+      python-path: /usr/bin/python3
+      script-dir: /opt/wavelet/scripts
   sync:
     schedule: "0 0 6,18 * * *"  # 6AM and 6PM daily
+    quotes-cron: "0 30 6,18 * * *"
+    trades-cron: "0 0 7,19 * * *"
+    yield-curve-cron: "0 0 6 * * *"
   cache:
     ttl-minutes: 30
 ```
 
+### requirements.txt
+```
+akshare>=1.14.0
+pandas>=2.0.0
+```
+
+## 11. Sample Python Scripts
+
+### scripts/fetch_quotes.py
+```python
+import json
+import akshare as ak
+
+def main():
+    df = ak.bond_spot_quote()
+    result = df.to_dict(orient='records')
+    print(json.dumps(result, ensure_ascii=False))
+
+if __name__ == "__main__":
+    main()
+```
+
+### scripts/fetch_yield_curve.py
+```python
+import json
+import akshare as ak
+from datetime import datetime
+
+def main():
+    today = datetime.now().strftime("%Y%m%d")
+    df = ak.bond_china_yield(start_date=today, end_date=today)
+    result = df.to_dict(orient='records')
+    print(json.dumps(result, ensure_ascii=False))
+
+if __name__ == "__main__":
+    main()
+```
+
 ---
 
-**Document Version:** 1.0  
+**Document Version:** 1.1  
 **Last Updated:** 2026-04-05
