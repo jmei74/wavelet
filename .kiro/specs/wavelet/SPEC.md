@@ -114,17 +114,17 @@
 
 ## 6. Data Source Integration
 
-### 6.1 Primary Data Source: AKShare
+### 6.1 Primary Data Source: AKShare + Web Scraping
 
-AKShare (https://github.com/akfamily/akshare) is an open-source Python financial data library providing comprehensive China bond market data.
+AKShare (https://github.com/akfamily/akshare) is an open-source Python financial data library providing comprehensive China bond market data. Historical data is fetched via web scraping from official sources.
 
 **Integration Architecture:**
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Wavelet Application (Java)                 │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐  │
-│  │ Data Service │───▶│ ProcessBridge │───▶│ Python AKShare   │  │
-│  │   (Java)     │    │ (ProcessExec)│    │   Scripts        │  │
+│  │ Data Service │───▶│ ProcessBridge │───▶│ Python Scripts   │  │
+│  │   (Java)     │    │ (ProcessExec)│    │ (AKShare/Scrape)│  │
 │  └──────────────┘    └──────────────┘    └──────────────────┘  │
 │         │                                       │               │
 │         ▼                                       ▼               │
@@ -135,29 +135,44 @@ AKShare (https://github.com/akfamily/akshare) is an open-source Python financial
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+**Data Sources:**
+
+| Source | Data Type | Method | URL |
+|--------|-----------|--------|-----|
+| AKShare | Current quotes/trades | Library | chinamoney.com.cn |
+| ChinaBond | Historical yield curves | Web scraping | chinabond.com.cn |
+| CFETS | Historical yield curves | API (requires auth) | chinamoney.com.cn |
+| AKShare | Bond info/master data | Library | chinamoney.com.cn |
+
 **Available AKShare Bond APIs:**
 
 | Function | Description | Data |
 |----------|-------------|------|
-| `bond_spot_quote()` | Interbank market maker quotes | bid/ask price, yield |
-| `bond_spot_deal()` | Spot market trade data | price, yield, volume |
-| `bond_china_yield()` | ChinaBond yield curves | tenor vs yield |
+| `bond_spot_quote()` | Interbank market maker quotes (current) | bid/ask price, yield |
+| `bond_spot_deal()` | Spot market trade data (current) | price, yield, volume |
 | `bond_info_cm()` | Bond master data | bond details from CFETS |
 | `bond_info_detail_cm()` | Bond detail info | full bond profile |
-| `bond_debt_nafmii()` | Interbank debt registration | registration data |
 
 **Python Data Fetcher Scripts:**
 
-| Script | Function |
-|--------|----------|
-| `fetch_quotes.py` | Fetch interbank bond quotes |
-| `fetch_trades.py` | Fetch spot market trades |
-| `fetch_yield_curve.py` | Fetch yield curve data |
-| `fetch_bond_info.py` | Fetch bond master data |
+| Script | Source | Function |
+|--------|--------|----------|
+| `fetch_yield_curve.py` | ChinaBond | Fetch historical yield curve data |
+| `fetch_quotes.py` | AKShare | Fetch interbank bond quotes (current) |
+| `fetch_trades.py` | AKShare | Fetch spot market trades (current) |
+| `fetch_bond_info.py` | AKShare | Fetch bond master data |
+
+**Historical Data Sources:**
+
+| Data | Source | URL | Limitation |
+|------|--------|-----|------------|
+| Yield Curves | ChinaBond | yield.chinabond.com.cn | Free, up to 1 year range |
+| Bond Valuation | ChinaBond | valuation.chinabond.com.cn | Free |
+| Closing Curves | CFETS | chinamoney.com.cn | Requires cookie registration |
 
 **Installation:**
 ```bash
-pip install akshare pandas
+pip install akshare pandas requests lxml
 ```
 
 ### 6.2 Data Entities Mapping
